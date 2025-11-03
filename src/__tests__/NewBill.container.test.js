@@ -6,7 +6,7 @@ import { ROUTES_PATH } from "../constants/routes";
 import router from "../app/Router.js";
 import "@testing-library/jest-dom";
 
-jest.mock("../app/store", () => mockStore);
+jest.mock("../app/Store", () => mockStore);
 
 const useRealRouterOnNewBill = async () => {
   // 1) root + router
@@ -46,7 +46,7 @@ const useRealRouterOnNewBill = async () => {
 };
 
 describe("NewBill (container)", () => {
-  test("accepte un fichier .png et ne montre pas d’erreur", async () => {
+  it("should accept a png file and doesnt' display an error message", async () => {
     await useRealRouterOnNewBill();
 
     const fileInput = await screen.findByTestId("file");
@@ -57,7 +57,7 @@ describe("NewBill (container)", () => {
     if (err) expect(err).not.toBeVisible();
   });
 
-  test("refuse un fichier .pdf, affiche un message et reset l’input", async () => {
+  it("should refuse a pdf file, display a message and reset the input", async () => {
     await useRealRouterOnNewBill();
 
     const fileInput = await screen.findByTestId("file");
@@ -72,12 +72,15 @@ describe("NewBill (container)", () => {
     expect(fileInput.value).toBe("");
   });
 
-  test("submit complet fait un POST + UPDATE et redirige vers Bills", async () => {
-    await useRealRouterOnNewBill();
+  it("should submit, do an UPDATE and redirect to Bills", async () => {
+    const { newBill } = await useRealRouterOnNewBill();
 
-    const createMock = jest.fn(() =>
-      Promise.resolve({ fileUrl: "https://test", key: "123" })
-    );
+    newBill.fileValid = true;
+    newBill.fileUrl = "https://test";
+    newBill.fileName = "justif.jpg";
+    newBill.billId = "123";
+
+    const createMock = jest.fn();
     const updateMock = jest.fn(() => Promise.resolve({}));
     const listMock = jest.fn(() => Promise.resolve([]));
 
@@ -95,18 +98,17 @@ describe("NewBill (container)", () => {
     userEvent.type(screen.getByTestId("pct"), "10");
     userEvent.type(screen.getByTestId("commentary"), "Course aéroport");
 
-    const file = new File(["img"], "justif.jpg", { type: "image/jpeg" });
-    await userEvent.upload(screen.getByTestId("file"), file);
-
     const form = await screen.findByTestId("form-new-bill");
     fireEvent.submit(form);
 
-    await waitFor(() => expect(createMock).toHaveBeenCalled());
     await waitFor(() => expect(updateMock).toHaveBeenCalled());
+    await waitFor(() => expect(listMock).toHaveBeenCalled());
     expect(screen.getByText(/Mes notes de frais/i)).toBeInTheDocument();
+
+    expect(createMock).not.toHaveBeenCalled();
   });
 
-  test("affiche une erreur 404 si l’API create renvoie 404", async () => {
+  it("should display an error 404 if the create API send back 404", async () => {
     await useRealRouterOnNewBill();
     window.onNavigate(ROUTES_PATH.NewBill);
     await screen.findByTestId("form-new-bill");
@@ -133,7 +135,7 @@ describe("NewBill (container)", () => {
     expect(screen.queryByText(/Mes notes de frais/i)).toBeNull();
   });
 
-  test("affiche une erreur 500 si l’API create renvoie 500", async () => {
+  test("should display an error 500 if the create API send back 500", async () => {
     await useRealRouterOnNewBill();
     window.onNavigate(ROUTES_PATH.NewBill);
     await screen.findByTestId("form-new-bill");
