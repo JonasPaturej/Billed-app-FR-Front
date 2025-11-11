@@ -6,21 +6,25 @@ export default class NewBill {
     this.document = document;
     this.onNavigate = onNavigate;
     this.store = store;
+
     const formNewBill = this.document.querySelector(
       `form[data-testid="form-new-bill"]`
     );
     if (formNewBill) formNewBill.addEventListener("submit", this.handleSubmit);
+
     const file = this.document.querySelector(`input[data-testid="file"]`);
     if (file) file.addEventListener("change", this.handleChangeFile);
+
     this.fileUrl = null;
     this.fileName = null;
     this.billId = null;
     this.fileValid = false;
+
     new Logout({ document, localStorage, onNavigate });
   }
 
   showFileError(message) {
-    // Crée/affiche un message d’erreur non intrusif pour les tests et l’UX
+    // Crée ou met à jour le message d’erreur lié au fichier
     let el = this.document.querySelector('[data-testid="file-error"]');
     if (!el) {
       el = this.document.createElement("p");
@@ -40,31 +44,32 @@ export default class NewBill {
     e.preventDefault();
     const input = this.document.querySelector(`input[data-testid="file"]`);
     const file = input?.files?.[0];
+
     if (!file) {
       this.fileValid = false;
       this.showFileError("");
       return;
     }
 
-    // ✅ validation type de fichier
-    const allowed = ["image/png", "image/jpeg", "image/jpg"];
-    if (!allowed.includes(file.type)) {
+    // Validation par nom ou type
+    const nameOk = /\.(png|jpe?g)$/i.test(file.name || "");
+    const typeOk = file.type
+      ? ["image/png", "image/jpeg", "image/jpg"].includes(file.type)
+      : false;
+
+    if (!(nameOk || typeOk)) {
       this.fileValid = false;
       this.fileUrl = null;
       this.fileName = null;
-      if (input) input.value = ""; // reset input
-      this.showFileError(
-        "Format de fichier non supporté. Utilisez .png, .jpg ou .jpeg."
-      );
+      if (input) input.value = "";
+      this.showFileError("Format non supporté (.png, .jpg, .jpeg uniquement).");
       return;
     }
 
-    // OK fichier image → on masque l’erreur
     this.showFileError("");
     this.fileValid = true;
 
-    const filePath = e.target.value.split(/\\/g);
-    const fileName = filePath[filePath.length - 1];
+    const fileName = file.name;
     const formData = new FormData();
     const email = JSON.parse(localStorage.getItem("user")).email;
     formData.append("file", file);
@@ -72,20 +77,33 @@ export default class NewBill {
 
     try {
       if (this.store?.bills) {
-        const { fileUrl, key } = await this.store.bills().create({
+        const res = await this.store.bills().create({
           data: formData,
-          headers: {
-            noContentType: true,
-          },
+          headers: { noContentType: true },
         });
-        this.billId = key;
+
+        console.log("create response", res);
+
+        const rawPath = res?.filePath ?? res?.data?.filePath ?? null;
+        const normalizedPath = rawPath ? rawPath.replace(/\\/g, "/") : null;
+        const backendOrigin = "http://localhost:5678";
+        const fileUrl = normalizedPath
+          ? `${backendOrigin}/${normalizedPath}`
+          : null;
+        const id = res?.id ?? res?.data?.id ?? null;
+
+        this.billId = id;
         this.fileUrl = fileUrl;
-        this.fileName = fileName;
+        this.fileName = file.name;
+
+        if (!this.billId || !this.fileUrl) {
+          this.fileValid = false;
+          this.showFileError("Erreur lors de l’envoi du fichier.");
+        }
       }
     } catch (error) {
-      // En cas d’erreur API upload, on invalide le fichier et on affiche un message générique
       this.fileValid = false;
-      this.showFileError("Impossible d'uploader le fichier. Réessayez.");
+      this.showFileError("Impossible d'uploader le fichier.");
       // console.error(error)
     }
   };
@@ -93,11 +111,27 @@ export default class NewBill {
   handleSubmit = (e) => {
     e.preventDefault();
 
-    // Garde : pas de submit si fichier invalide
-    if (!this.fileValid || !this.fileUrl) {
+    const fileInput = this.document.querySelector(`input[data-testid="file"]`);
+    const file = fileInput?.files?.[0] || null;
+
+    const nameOk = file ? /\.(png|jpe?g)$/i.test(file.name) : false;
+    const typeOk = file
+      ? ["image/png", "image/jpeg", "image/jpg"].includes(file.type)
+      : false;
+    const okByExtension = nameOk || typeOk;
+
+    const needsUpload = !!this.store?.bills;
+    const uploadReady = this.fileValid && !!this.billId && !!this.fileUrl;
+
+    if (!okByExtension) {
       this.showFileError(
-        "Veuillez sélectionner une image valide (.png/.jpg/.jpeg)."
+        "Veuillez sélectionner une image valide (.png, .jpg ou .jpeg)."
       );
+      if (fileInput) fileInput.value = "";
+      return;
+    }
+    if (needsUpload && !uploadReady) {
+      this.showFileError("Erreur lors de l’envoi du fichier.");
       return;
     }
 
@@ -119,24 +153,50 @@ export default class NewBill {
       fileUrl: this.fileUrl,
       fileName: this.fileName,
       status: "pending",
+      id: this.billId,
     };
 
-    this.updateBill(bill);
-    this.onNavigate(ROUTES_PATH["Bills"]);
+    return this.updateBill(bill);
   };
 
-  // not need to cover this function by tests
-  updateBill = (bill) => {
-    if (this.store?.bills) {
-      return this.store
-        .bills()
-        .update({ data: JSON.stringify(bill), selector: this.billId })
-        .then(() => {
-          this.onNavigate(ROUTES_PATH["Bills"]);
-        })
-        .catch((error) => {
-          // console.error(error)
-        });
+  // Met à jour la note de frais
+  updateBill = async (bill) => {
+    try {
+      const selector = String(this.billId ?? bill.id);
+      const jwt = localStorage.getItem("jwt");
+
+      const payload = {
+        ...bill,
+        id: Number.isNaN(Number(selector)) ? selector : Number(selector),
+      };
+
+      const res = await fetch(`http://localhost:5678/bills/${selector}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+          ...(jwt ? { Authorization: `Bearer ${jwt}` } : {}),
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        console.log("[UPDATE BILL] status:", res.status);
+        console.log("[UPDATE BILL] response:", text);
+        throw new Error(`Erreur serveur (${res.status})`);
+      }
+
+      if (res.status !== 204) {
+        try {
+          await res.json();
+        } catch (_) {}
+      }
+
+      this.onNavigate(ROUTES_PATH["Bills"]);
+    } catch (error) {
+      this.showFileError("Impossible de sauvegarder la note de frais.");
+      //console.error(error)
     }
     return null;
   };

@@ -95,7 +95,12 @@ export default class Login {
           })
         )
         .then(({ jwt }) => {
+          console.log("[LOGIN] JWT reçu :", jwt);
           localStorage.setItem("jwt", jwt);
+          console.log("[LOGIN] JWT stocké :", localStorage.getItem("jwt"));
+        })
+        .catch((err) => {
+          console.error("[LOGIN] Erreur lors du login :", err);
         });
     }
     return null;
