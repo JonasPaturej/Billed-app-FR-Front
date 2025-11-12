@@ -41,14 +41,14 @@ export default class {
         .bills()
         .list()
         .then((snapshot) => {
-          // 1) Conserver la date brute pour trier correctement
+          //Conserver la date brute pour trier correctement
           const billsRaw = snapshot.map((doc) => ({
             ...doc,
             status: formatStatus(doc.status),
           }));
-          // 2) Tri anti-chronologique (du + récent au + ancien)
+          //Tri anti-chronologique (du + récent au + ancien)
           billsRaw.sort((a, b) => new Date(b.date) - new Date(a.date));
-          // 3) Formater l'affichage des dates après le tri
+          //Formater l'affichage des dates après le tri
           const bills = billsRaw.map((doc) => {
             try {
               return {
@@ -56,16 +56,16 @@ export default class {
                 date: formatDate(doc.date),
               };
             } catch (e) {
-              // if for some reason, corrupted data was introduced, we manage here failing formatDate function
-              // log the error and return unformatted date in that case
-              // console.log(e,'for',doc)
+              //if for some reason, corrupted data was introduced, we manage here failing formatDate function
+              //log the error and return unformatted date in that case
+              //console.log(e,'for',doc)
               return {
                 ...doc,
                 date: doc.date,
               };
             }
           });
-          // console.log('length', bills.length)
+          //console.log('length', bills.length)
           return bills;
         });
     }
