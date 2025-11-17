@@ -42,7 +42,7 @@ export default class NewBill {
     el.style.display = message ? "block" : "none";
   }
 
-  // Vérification du formulaire et du format que l'on envoie
+  // Vérification du format du fichier que l'on envoie
   handleChangeFile = (e) => {
     e.preventDefault();
 
