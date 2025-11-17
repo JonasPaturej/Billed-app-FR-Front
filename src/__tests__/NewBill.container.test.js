@@ -1,3 +1,6 @@
+/**
+ * @jest-environment jsdom
+ */
 import { screen, fireEvent, waitFor } from "@testing-library/dom";
 import userEvent from "@testing-library/user-event";
 import NewBill from "../containers/NewBill.js";
@@ -9,22 +12,17 @@ import "@testing-library/jest-dom";
 jest.mock("../app/Store", () => mockStore);
 
 const useRealRouterOnNewBill = async () => {
-  // 1) root + router
   document.body.innerHTML = `<div id="root"></div>`;
   router();
 
-  // 2) simulate logged-in employee
   window.localStorage.setItem(
     "user",
-    JSON.stringify({ type: "Employee", email: "a@a" })
+    JSON.stringify({ type: "Employee", email: "employee@test.tld" })
   );
 
-  // 3) navigate via router (injects layout + icons + page)
   window.onNavigate(ROUTES_PATH.NewBill);
-
   await screen.findByTestId("form-new-bill");
 
-  // (sanity) ensure icons exist to avoid classList null
   if (!document.querySelector('[data-testid="icon-mail"]')) {
     const aside = document.createElement("aside");
     aside.innerHTML = `
@@ -34,7 +32,6 @@ const useRealRouterOnNewBill = async () => {
     document.body.appendChild(aside);
   }
 
-  // 4) instantiate container using the real onNavigate
   const newBill = new NewBill({
     document,
     onNavigate: window.onNavigate,
@@ -75,12 +72,13 @@ describe("NewBill (container)", () => {
   it("should submit, do an UPDATE and redirect to Bills", async () => {
     const { newBill } = await useRealRouterOnNewBill();
 
-    newBill.fileValid = true;
-    newBill.fileUrl = "https://test";
-    newBill.fileName = "justif.jpg";
-    newBill.billId = "123";
-
-    const createMock = jest.fn();
+    const createMock = jest.fn(() =>
+      Promise.resolve({
+        fileUrl: "https://test",
+        key: "123",
+        id: "123",
+      })
+    );
     const updateMock = jest.fn(() => Promise.resolve({}));
     const listMock = jest.fn(() => Promise.resolve([]));
 
@@ -98,64 +96,82 @@ describe("NewBill (container)", () => {
     userEvent.type(screen.getByTestId("pct"), "10");
     userEvent.type(screen.getByTestId("commentary"), "Course aéroport");
 
+    const file = new File(["img"], "justif.jpg", { type: "image/jpeg" });
+    await userEvent.upload(screen.getByTestId("file"), file);
+
     const form = await screen.findByTestId("form-new-bill");
     fireEvent.submit(form);
 
-    await waitFor(() => expect(updateMock).toHaveBeenCalled());
-    await waitFor(() => expect(listMock).toHaveBeenCalled());
-    expect(screen.getByText(/Mes notes de frais/i)).toBeInTheDocument();
+    await waitFor(() => expect(createMock).toHaveBeenCalled());
 
-    expect(createMock).not.toHaveBeenCalled();
+    await waitFor(() => expect(updateMock).toHaveBeenCalled());
+
+    await waitFor(() => expect(listMock).toHaveBeenCalled());
+
+    expect(screen.getByText(/Mes notes de frais/i)).toBeInTheDocument();
   });
 
   it("should display an error 404 if the create API send back 404", async () => {
     await useRealRouterOnNewBill();
-    window.onNavigate(ROUTES_PATH.NewBill);
-    await screen.findByTestId("form-new-bill");
+
+    const createMock = jest.fn(() => Promise.reject({ status: 404 }));
 
     jest.spyOn(mockStore, "bills").mockImplementation(() => ({
-      create: () => Promise.reject({ status: 404 }),
-      update: () => Promise.resolve({}),
-      list: () => Promise.resolve([]),
+      create: createMock,
+      update: jest.fn(),
+      list: jest.fn(),
     }));
 
-    const fileInput = await screen.findByTestId("file");
-    const file = new File(["img"], "x.png", { type: "image/png" });
-    await userEvent.upload(fileInput, file);
+    userEvent.selectOptions(screen.getByTestId("expense-type"), "Transports");
+    userEvent.type(screen.getByTestId("expense-name"), "Taxi");
+    userEvent.type(screen.getByTestId("amount"), "42");
+    userEvent.type(screen.getByTestId("datepicker"), "2023-01-01");
+    userEvent.type(screen.getByTestId("vat"), "20");
+    userEvent.type(screen.getByTestId("pct"), "10");
+    userEvent.type(screen.getByTestId("commentary"), "Erreur 404 test");
 
-    // l’erreur s’affiche suite à l’upload (create rejeté)
-    const err = await screen.findByTestId("file-error");
-    expect(err).toBeVisible();
+    const file = new File(["img"], "ok.jpg", { type: "image/jpeg" });
+    await userEvent.upload(screen.getByTestId("file"), file);
 
-    // submit ne doit pas nous rediriger (fileValid = false)
     const form = await screen.findByTestId("form-new-bill");
     fireEvent.submit(form);
 
-    // on confirme qu’on n'est pas sur Bills
-    expect(screen.queryByText(/Mes notes de frais/i)).toBeNull();
+    const err = await screen.findByTestId("file-error");
+    expect(err).toBeVisible();
+    expect(err.textContent.toLowerCase()).toMatch(
+      /impossible d'uploader le fichier/i
+    );
   });
 
-  test("should display an error 500 if the create API send back 500", async () => {
+  it("should display an error 500 if the create API send back 500", async () => {
     await useRealRouterOnNewBill();
-    window.onNavigate(ROUTES_PATH.NewBill);
-    await screen.findByTestId("form-new-bill");
+
+    const createMock = jest.fn(() => Promise.reject({ status: 500 }));
 
     jest.spyOn(mockStore, "bills").mockImplementation(() => ({
-      create: () => Promise.reject({ status: 500 }),
-      update: () => Promise.resolve({}),
-      list: () => Promise.resolve([]),
+      create: createMock,
+      update: jest.fn(),
+      list: jest.fn(),
     }));
 
-    const fileInput = await screen.findByTestId("file");
-    const file = new File(["img"], "y.png", { type: "image/png" });
-    await userEvent.upload(fileInput, file);
+    userEvent.selectOptions(screen.getByTestId("expense-type"), "Transports");
+    userEvent.type(screen.getByTestId("expense-name"), "Taxi");
+    userEvent.type(screen.getByTestId("amount"), "42");
+    userEvent.type(screen.getByTestId("datepicker"), "2023-01-01");
+    userEvent.type(screen.getByTestId("vat"), "20");
+    userEvent.type(screen.getByTestId("pct"), "10");
+    userEvent.type(screen.getByTestId("commentary"), "Erreur 500 test");
 
-    const err = await screen.findByTestId("file-error");
-    expect(err).toBeVisible();
+    const file = new File(["img"], "ok.jpg", { type: "image/jpeg" });
+    await userEvent.upload(screen.getByTestId("file"), file);
 
     const form = await screen.findByTestId("form-new-bill");
     fireEvent.submit(form);
 
-    expect(screen.queryByText(/Mes notes de frais/i)).toBeNull();
+    const err = await screen.findByTestId("file-error");
+    expect(err).toBeVisible();
+    expect(err.textContent.toLowerCase()).toMatch(
+      /impossible d'uploader le fichier/i
+    );
   });
 });
