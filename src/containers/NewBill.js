@@ -6,26 +6,28 @@ export default class NewBill {
     this.document = document;
     this.onNavigate = onNavigate;
     this.store = store;
-
-    this.fileUrl = null;
-    this.fileName = null;
-    this.billId = null;
-    this.pendingFile = null;
+    this.localStorage = localStorage;
 
     const formNewBill = this.document.querySelector(
       `form[data-testid="form-new-bill"]`
     );
     if (formNewBill) {
       formNewBill.addEventListener("submit", this.handleSubmit);
+      formNewBill.addEventListener("reset", this.cleanupDraft);
     }
 
-    const file = this.document.querySelector(`input[data-testid="file"]`);
-    if (file) file.addEventListener("change", this.handleChangeFile);
+    const fileInput = this.document.querySelector(`input[data-testid="file"]`);
+    if (fileInput) fileInput.addEventListener("change", this.handleChangeFile);
+
+    this.fileUrl = null;
+    this.fileName = null;
+    this.billId = null;
+    this.fileValid = false;
+    this.pendingFile = null;
 
     new Logout({ document, localStorage, onNavigate });
   }
 
-  // Crée ou met à jour le message d’erreur lié au fichier
   showFileError(message) {
     let el = this.document.querySelector('[data-testid="file-error"]');
     if (!el) {
@@ -42,127 +44,125 @@ export default class NewBill {
     el.style.display = message ? "block" : "none";
   }
 
-  // Vérification du format du fichier que l'on envoie
   handleChangeFile = (e) => {
     e.preventDefault();
 
-    const input = this.document.querySelector(`input[data-testid="file"]`);
+    const input = e.target;
     const file = input?.files?.[0];
 
     if (!file) {
+      this.fileValid = false;
       this.pendingFile = null;
       this.fileName = null;
       this.showFileError("");
       return;
     }
 
-    const nameOk = /\.(png|jpe?g)$/i.test(file.name || "");
-    const typeOk = file.type
-      ? ["image/png", "image/jpeg", "image/jpg"].includes(file.type)
-      : false;
+    const isValidExtension = /\.(png|jpe?g)$/i.test(file.name);
+    const isValidMime = ["image/png", "image/jpeg", "image/jpg"].includes(
+      file.type
+    );
 
-    if (!(nameOk || typeOk)) {
+    if (!isValidExtension && !isValidMime) {
+      this.fileValid = false;
       this.pendingFile = null;
       this.fileName = null;
-      if (input) input.value = "";
+      input.value = "";
       this.showFileError("Format de fichier non supporté");
       return;
     }
 
     this.showFileError("");
+    this.fileValid = true;
     this.pendingFile = file;
     this.fileName = file.name;
   };
 
-  // Envoi du formulaire
   handleSubmit = async (e) => {
     e.preventDefault();
 
     const fileInput = this.document.querySelector(`input[data-testid="file"]`);
-    const file = this.pendingFile || fileInput?.files?.[0] || null;
+    const file = this.pendingFile || fileInput?.files?.[0];
 
-    let uploadedFileUrl = this.fileUrl;
-    let uploadedBillId = this.billId;
-
-    if (!uploadedFileUrl || !uploadedBillId) {
-      if (!file) {
-        this.showFileError(
-          "Veuillez sélectionner une image valide (.png, .jpg ou .jpeg)."
-        );
-        return;
-      }
-
-      const nameOk = /\.(png|jpe?g)$/i.test(file.name);
-      const typeOk = ["image/png", "image/jpeg", "image/jpg"].includes(
-        file.type
-      );
-      const okByExtension = nameOk || typeOk;
-
-      if (!okByExtension) {
-        this.showFileError(
-          "Veuillez sélectionner une image valide (.png, .jpg ou .jpeg)."
-        );
-        if (fileInput) fileInput.value = "";
-        return;
-      }
-
-      if (this.store?.bills) {
-        const formData = new FormData();
-        const email = JSON.parse(localStorage.getItem("user")).email;
-        formData.append("file", file);
-        formData.append("email", email);
-
-        try {
-          const res = await this.store.bills().create({
-            data: formData,
-            headers: { noContentType: true },
-          });
-
-          const rawPath = res?.filePath ?? res?.data?.filePath ?? null;
-          const normalizedPath = rawPath ? rawPath.replace(/\\/g, "/") : null;
-          const backendOrigin = "http://localhost:5678";
-
-          uploadedFileUrl =
-            res?.fileUrl ??
-            res?.data?.fileUrl ??
-            (normalizedPath ? `${backendOrigin}/${normalizedPath}` : null);
-
-          uploadedBillId =
-            res?.key ?? res?.data?.key ?? res?.id ?? res?.data?.id ?? null;
-
-          this.fileUrl = uploadedFileUrl;
-          this.billId = uploadedBillId;
-          this.fileName = this.fileName || file.name;
-
-          if (!uploadedFileUrl || !uploadedBillId) {
-            this.showFileError("Erreur lors de l’envoi du fichier.");
-            return;
-          }
-        } catch (_) {
-          this.showFileError("Impossible d'uploader le fichier.");
-          return;
-        }
-      }
-    }
-
-    if (!uploadedFileUrl || !uploadedBillId) {
-      this.showFileError("Erreur lors de l’envoi du fichier.");
+    if (!file) {
+      this.showFileError("Veuillez sélectionner une image valide.");
       return;
     }
 
-    const email = JSON.parse(localStorage.getItem("user")).email;
+    const isValidExtension = /\.(png|jpe?g)$/i.test(file.name);
+    const isValidMime = ["image/png", "image/jpeg", "image/jpg"].includes(
+      file.type
+    );
+
+    if (!isValidExtension && !isValidMime) {
+      this.showFileError(
+        "Veuillez sélectionner une image valide (.png, .jpg ou .jpeg)."
+      );
+      if (fileInput) fileInput.value = "";
+      return;
+    }
+
+    let uploadedFileUrl = null;
+    let uploadedBillId = null;
+
+    if (this.store?.bills) {
+      const formData = new FormData();
+      const email = JSON.parse(this.localStorage.getItem("user")).email;
+
+      formData.append("file", file);
+      formData.append("email", email);
+
+      try {
+        const res = await this.store.bills().create({
+          data: formData,
+          headers: { noContentType: true },
+        });
+
+        const rawPath = res?.filePath ?? res?.data?.filePath ?? null;
+        const normalized = rawPath ? rawPath.replace(/\\/g, "/") : null;
+        const backendOrigin = "http://localhost:5678";
+
+        uploadedFileUrl =
+          res?.fileUrl ??
+          res?.data?.fileUrl ??
+          (normalized ? `${backendOrigin}/${normalized}` : null);
+
+        uploadedBillId =
+          res?.key ?? res?.data?.key ?? res?.id ?? res?.data?.id ?? null;
+
+        if (!uploadedFileUrl || !uploadedBillId) {
+          this.showFileError("Erreur lors de l’envoi du fichier.");
+          return;
+        }
+      } catch (error) {
+        if (error && error.status === 404) {
+          this.showFileError("Erreur 404 : impossible de sauvegarder.");
+        } else if (error && error.status === 500) {
+          this.showFileError("Erreur 500 : erreur serveur");
+        } else {
+          this.showFileError("Impossible d'uploader le fichier.");
+        }
+        return;
+      }
+    }
+
+    const email = JSON.parse(this.localStorage.getItem("user")).email;
+
     const bill = {
       email,
       type: e.target.querySelector(`select[data-testid="expense-type"]`).value,
       name: e.target.querySelector(`input[data-testid="expense-name"]`).value,
       amount: parseInt(
-        e.target.querySelector(`input[data-testid="amount"]`).value
+        e.target.querySelector(`input[data-testid="amount"]`).value,
+        10
       ),
       date: e.target.querySelector(`input[data-testid="datepicker"]`).value,
       vat: e.target.querySelector(`input[data-testid="vat"]`).value,
       pct:
-        parseInt(e.target.querySelector(`input[data-testid="pct"]`).value) ||
-        20,
+        parseInt(
+          e.target.querySelector(`input[data-testid="pct"]`).value,
+          10
+        ) || 20,
       commentary: e.target.querySelector(`textarea[data-testid="commentary"]`)
         .value,
       fileUrl: uploadedFileUrl,
@@ -174,19 +174,25 @@ export default class NewBill {
     return this.updateBill(bill);
   };
 
-  // Met à jour la note de frais
-  updateBill = (bill) => {
-    if (this.store?.bills) {
-      return this.store
+  updateBill = async (bill) => {
+    if (!this.store?.bills) return null;
+
+    try {
+      const result = await this.store
         .bills()
-        .update({ data: JSON.stringify(bill), selector: bill.id })
-        .then(() => {
-          this.onNavigate(ROUTES_PATH["Bills"]);
-        })
-        .catch(() => {
-          this.showFileError("Impossible de sauvegarder la note de frais.");
-        });
+        .update({ data: JSON.stringify(bill), selector: bill.id });
+
+      this.onNavigate(ROUTES_PATH["Bills"]);
+      return result;
+    } catch (error) {
+      if (error && error.status === 404) {
+        this.showFileError("Erreur 404 : impossible de sauvegarder.");
+      } else if (error && error.status === 500) {
+        this.showFileError("Erreur 500 : erreur serveur");
+      } else {
+        this.showFileError("Impossible de sauvegarder la note de frais.");
+      }
+      return null;
     }
-    return null;
   };
 }
