@@ -51,7 +51,7 @@ describe("Bills container", () => {
     expect($.fn.modal).toHaveBeenCalledWith("show");
   });
 
-  test("getBills should return sorted & formatted bills", async () => {
+  test("getBills should return bills sorted by date DESC and formatted correctly", async () => {
     const bills = new Bills({
       document,
       onNavigate: () => {},
@@ -62,7 +62,26 @@ describe("Bills container", () => {
     const result = await bills.getBills();
 
     expect(result.length).toBeGreaterThan(0);
-    expect(result[0].date).toMatch(/[A-Za-zé]+/);
+
+    const resultDates = result
+      .map((b) => new Date(b.date).getTime())
+      .filter((d) => !isNaN(d));
+    const sortedResultDates = [...resultDates].sort((a, b) => b - a);
+    expect(resultDates).toEqual(sortedResultDates);
+
+    result.forEach((bill) => {
+      expect(bill).toHaveProperty("id");
+      expect(bill).toHaveProperty("type");
+      expect(bill).toHaveProperty("name");
+      expect(bill).toHaveProperty("amount");
+      expect(bill).toHaveProperty("date");
+      expect(bill).toHaveProperty("status");
+      expect(bill).toHaveProperty("fileUrl");
+    });
+
+    result.forEach((bill) => {
+      expect(bill.date).toMatch(/[A-Za-zé]+/);
+    });
   });
 
   test("should call store.bills().list()", async () => {
